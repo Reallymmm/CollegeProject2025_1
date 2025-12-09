@@ -157,14 +157,27 @@ def display_schedule_view(app, appointments, date):
     sch_fr = ctk.CTkFrame(app.scrollable_cards_frame)
     sch_fr.pack(fill="both", expand=True)
     sch_fr.columnconfigure(1, weight=1)
+    # Показать строки по полчаса, объединяя часовой ярлык на две строки
     for i, h in enumerate(range(7, 23)):
-        ts = f"{h:02d}:00"
-        ctk.CTkLabel(sch_fr, text=ts).grid(row=i, column=0, padx=10)
-        slot = ctk.CTkFrame(sch_fr, height=40, border_width=1)
-        slot.grid(row=i, column=1, sticky="ew", pady=1)
+        hour_label = f"{h:02d}:00"
+        row_top = i * 2
+        # Часовой ярлык занимаем 2 строки (00 и 30). Приклеиваем к верху,
+        # а слоты немного опускаем вниз чтобы метка выглядела чуть выше записей.
+        ctk.CTkLabel(sch_fr, text=hour_label).grid(row=row_top, column=0, rowspan=2, padx=10, sticky="n")
+
+        # Верхняя половина: :00 (даём небольшой верхний отступ)
+        slot_top = ctk.CTkFrame(sch_fr, height=22, border_width=1)
+        slot_top.grid(row=row_top, column=1, sticky="ew", pady=(6, 0))
+        # Нижняя половина: :30
+        slot_bottom = ctk.CTkFrame(sch_fr, height=22, border_width=1)
+        slot_bottom.grid(row=row_top + 1, column=1, sticky="ew", pady=(0, 2))
+
         for app_item in appointments:
-            if app_item['time'].startswith(f"{h:02d}"):
-                ctk.CTkLabel(slot, text=f"[{app_item['time']}] {app_item['details']}", fg_color="#3A8FCD").pack(fill="x", pady=1)
+            t = app_item.get('time', '')
+            if t == f"{h:02d}:00":
+                ctk.CTkLabel(slot_top, text=f"[{t}] {app_item['details']}", fg_color="#3A8FCD").pack(fill="x", pady=1)
+            elif t == f"{h:02d}:30":
+                ctk.CTkLabel(slot_bottom, text=f"[{t}] {app_item['details']}", fg_color="#3A8FCD").pack(fill="x", pady=1)
 
 
 def open_schedule_date_picker(app):

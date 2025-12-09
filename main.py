@@ -39,12 +39,11 @@ class DBApp(ctk.CTk):
         self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
 
-        ctk.CTkLabel(self.sidebar_frame, text="РАЗДЕЛЫ СИСТЕМЫ", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0,
-                                                                                                                column=0,
-                                                                                                                padx=20,
-                                                                                                                pady=(
-                                                                                                                    20,
-                                                                                                                    10))
+        ctk.CTkLabel(
+            self.sidebar_frame,
+            text="РАЗДЕЛЫ СИСТЕМЫ",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).grid(row=0, column=0, padx=20, pady=(20, 10))
 
         row_counter = 1
         for entity_name in config.FIXED_ENTITIES:
