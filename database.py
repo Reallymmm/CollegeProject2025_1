@@ -13,6 +13,44 @@ def initialize_database(conn):
     try:
         for entity, schema in INITIAL_SCHEMAS.items():
             conn.execute(f'CREATE TABLE IF NOT EXISTS "{entity}" ({schema})')
+        
+        # Миграция: добавляем колонку ID_Услуги в таблицу Записи, если её нет
+        try:
+            cursor = conn.cursor()
+            cursor.execute('PRAGMA table_info("Записи")')
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'ID_Услуги' not in columns:
+                conn.execute('ALTER TABLE "Записи" ADD COLUMN "ID_Услуги" INTEGER')
+        except sqlite3.Error:
+            pass  # Колонка уже существует
+        
+        # Миграция: добавляем колонку Цена_за_единицу в таблицу Склад, если её нет
+        try:
+            cursor.execute('PRAGMA table_info("Склад")')
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'Цена_за_единицу' not in columns:
+                conn.execute('ALTER TABLE "Склад" ADD COLUMN "Цена_за_единицу" REAL')
+        except sqlite3.Error:
+            pass  # Колонка уже существует
+
+        # Миграция: удаляем колонку Email из таблицы Клиенты (SQLite не поддерживает DROP COLUMN напрямую)
+        try:
+            cursor.execute('PRAGMA table_info("Клиенты")')
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'Email' in columns:
+                # Создаём новую таблицу без Email
+                conn.execute('CREATE TABLE IF NOT EXISTS "Клиенты_new" (ID INTEGER PRIMARY KEY AUTOINCREMENT, Имя TEXT, Телефон TEXT)')
+                # Копируем данные (если колонка Email существует, копируем только нужные колонки)
+                cursor.execute('SELECT ID, Имя, Телефон FROM "Клиенты"')
+                rows = cursor.fetchall()
+                for r in rows:
+                    conn.execute('INSERT INTO "Клиенты_new" (ID, Имя, Телефон) VALUES (?, ?, ?)', (r['ID'], r['Имя'], r['Телефон']))
+                # Удаляем старую таблицу и переименовываем новую
+                conn.execute('DROP TABLE "Клиенты"')
+                conn.execute('ALTER TABLE "Клиенты_new" RENAME TO "Клиенты"')
+        except sqlite3.Error:
+            pass
+        
         conn.commit()
     except sqlite3.Error as e:
         from tkinter import messagebox
@@ -37,12 +75,12 @@ def insert_sample_data(conn):
         # 2. Клиенты
         cursor.execute('SELECT COUNT(*) FROM "Клиенты"')
         if cursor.fetchone()[0] == 0:
-            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон", "Email") VALUES (?, ?, ?)',
-                         ('Ольга С.', '777-1111', 'o.s@mail.ru'))
-            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон", "Email") VALUES (?, ?, ?)',
-                         ('Николай П.', '777-2222', 'n.p@mail.ru'))
-            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон", "Email") VALUES (?, ?, ?)',
-                         ('Анна К.', '777-3333', 'a.k@mail.ru'))
+            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон") VALUES (?, ?)',
+                         ('Ольга С.', '777-1111'))
+            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон") VALUES (?, ?)',
+                         ('Николай П.', '777-2222'))
+            conn.execute('INSERT INTO "Клиенты" ("Имя", "Телефон") VALUES (?, ?)',
+                         ('Анна К.', '777-3333'))
 
         # 3. График работы
         cursor.execute('SELECT COUNT(*) FROM "График работы"')

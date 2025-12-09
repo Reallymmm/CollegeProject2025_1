@@ -1,6 +1,8 @@
 import customtkinter as ctk
 import datetime
 import calendar
+import tkinter as tk
+from tkinter import messagebox
 
 
 def get_monthly_finance_data(conn, target_date):
@@ -145,10 +147,10 @@ def display_schedule_view(app, appointments, date):
         w.destroy()
     app.top_controls.grid_columnconfigure(0, weight=1)
     app.top_controls.grid_columnconfigure(1, weight=2)
-    app.top_controls.grid_columnconfigure(2, weight=1)
-    ctk.CTkButton(app.top_controls, text="<", command=lambda: app.change_schedule_date(-1)).grid(row=0, column=0)
+    app.top_controls.grid_columnconfigure(2, weight=0)
+    # Выбор даты через календарь вместо перемещения стрелками
+    ctk.CTkButton(app.top_controls, text="Выбрать дату", command=lambda: open_schedule_date_picker(app)).grid(row=0, column=0, padx=5, sticky="w")
     ctk.CTkLabel(app.top_controls, text=date.strftime("%d %B %Y"), font=("Arial", 18)).grid(row=0, column=1)
-    ctk.CTkButton(app.top_controls, text=">", command=lambda: app.change_schedule_date(1)).grid(row=0, column=2)
 
     for w in app.scrollable_cards_frame.winfo_children():
         w.destroy()
@@ -163,6 +165,127 @@ def display_schedule_view(app, appointments, date):
         for app_item in appointments:
             if app_item['time'].startswith(f"{h:02d}"):
                 ctk.CTkLabel(slot, text=f"[{app_item['time']}] {app_item['details']}", fg_color="#3A8FCD").pack(fill="x", pady=1)
+
+
+def open_schedule_date_picker(app):
+    """Открывает простое окно-календарь для выбора даты расписания."""
+    top = tk.Toplevel(app)
+    top.title("Выберите дату")
+    top.transient(app)
+    top.grab_set()
+
+    # Текущая отображаемая месячная дата в пикере
+    cur_date = app.schedule_date.replace(day=1)
+
+    header = tk.Frame(top)
+    header.pack(fill="x", pady=4)
+
+    month_label = tk.Label(header, text=cur_date.strftime('%B %Y').capitalize(), font=("Arial", 12, "bold"))
+    month_label.pack(side="top", pady=2)
+
+    cal_fr = tk.Frame(top)
+    cal_fr.pack(padx=6, pady=6)
+
+    def render(month_date):
+        for w in cal_fr.winfo_children():
+            w.destroy()
+        month_label.config(text=month_date.strftime('%B %Y').capitalize())
+        cal = calendar.monthcalendar(month_date.year, month_date.month)
+        # Weekday headers
+        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for c, d in enumerate(days):
+            lbl = tk.Label(cal_fr, text=d, width=4, fg="#666666")
+            lbl.grid(row=0, column=c)
+        for r, week in enumerate(cal, start=1):
+            for c, d in enumerate(week):
+                if d == 0:
+                    lbl = tk.Label(cal_fr, text="", width=4)
+                    lbl.grid(row=r, column=c, padx=2, pady=2)
+                    continue
+                def on_choose(day=d, md=month_date):
+                    chosen = datetime.date(md.year, md.month, day)
+                    app.schedule_date = chosen
+                    app._display_entity_data("Расписание")
+                    top.destroy()
+
+                btn = tk.Button(cal_fr, text=str(d), width=4, command=on_choose)
+                # Highlight today's date
+                if datetime.date.today() == datetime.date(month_date.year, month_date.month, d):
+                    btn.config(relief='solid')
+                btn.grid(row=r, column=c, padx=2, pady=2)
+
+    # Навигация по месяцам внутри пикера
+    def prev_month():
+        nonlocal cur_date
+        y = cur_date.year
+        m = cur_date.month - 1
+        if m < 1:
+            m = 12
+            y -= 1
+        cur_date = cur_date.replace(year=y, month=m, day=1)
+        render(cur_date)
+
+    def next_month():
+        nonlocal cur_date
+        y = cur_date.year
+        m = cur_date.month + 1
+        if m > 12:
+            m = 1
+            y += 1
+        cur_date = cur_date.replace(year=y, month=m, day=1)
+        render(cur_date)
+
+    nav = tk.Frame(top)
+    nav.pack(fill="x")
+    prev_btn = tk.Button(nav, text="◀", command=prev_month, width=3)
+    prev_btn.pack(side="left", padx=6)
+    next_btn = tk.Button(nav, text="▶", command=next_month, width=3)
+    next_btn.pack(side="right", padx=6)
+
+    render(cur_date)
+
+
+def complete_appointment(app, record_id):
+    """Отметить запись как завершённую и записать прибыль в таблицу Финансы."""
+    cur = app.conn.cursor()
+    cur.execute('SELECT * FROM "Записи" WHERE ID = ?', (record_id,))
+    rec = cur.fetchone()
+    if not rec:
+        messagebox.showerror("Ошибка", "Запись не найдена.")
+        return
+
+    service_id = rec['ID_Услуги']
+    date = rec['Дата']
+
+    service_price = 0.0
+    service_name = ''
+    if service_id:
+        cur.execute('SELECT "Цена", "Название" FROM "Услуги" WHERE ID = ?', (service_id,))
+        s = cur.fetchone()
+        if s:
+            try:
+                service_price = float(s['Цена']) if s['Цена'] is not None else 0.0
+            except:
+                service_price = 0.0
+            service_name = s['Название'] or ''
+
+    # Учитываем только доход с записи (стоимость услуги).
+    tipo = 'Доход'
+    amount = service_price
+
+    # Описание записи
+    cur.execute('SELECT "Имя" FROM "Клиенты" WHERE ID = ?', (rec['ID_Клиента'],))
+    client_row = cur.fetchone()
+    client_name = client_row['Имя'] if client_row else ''
+    description = f"Прибыль по записи #{record_id}: {service_name} ({client_name})"
+
+    app.conn.execute('INSERT INTO "Финансы" ("Тип", "Сумма", "Дата", "Описание") VALUES (?, ?, ?, ?)',
+                     (tipo, amount, date, description))
+    app.conn.commit()
+
+    messagebox.showinfo("Готово", f"Прибыль записана: {amount:.2f} ({tipo})")
+    # Показать раздел Финансы, чтобы пользователь увидел запись
+    app._display_entity_data("Финансы")
 
 
 def display_entity_cards(app, entity_name, records, columns):
@@ -215,6 +338,12 @@ def display_entity_cards(app, entity_name, records, columns):
                     cursor.execute('SELECT "Имя" FROM "Клиенты" WHERE ID = ?', (record[name],))
                     client_row = cursor.fetchone()
                     value = client_row['Имя'] if client_row else 'Неизвестно'
+                elif name == 'ID_Услуги':
+                    display_label = "Услуга"
+                    cursor = app.conn.cursor()
+                    cursor.execute('SELECT "Название" FROM "Услуги" WHERE ID = ?', (record[name],))
+                    service_row = cursor.fetchone()
+                    value = service_row['Название'] if service_row else 'Не указана'
 
             # Цвет текста для склада (Мало товара = Красный)
             text_color = "white"
@@ -226,6 +355,15 @@ def display_entity_cards(app, entity_name, records, columns):
                         text_color = "#55FF55"
                 except:
                     pass
+            
+            # Форматирование цены для склада
+            if entity_name == "Склад" and name == "Цена_за_единицу":
+                try:
+                    price_val = float(value) if value else 0
+                    value = f"{price_val:.2f} руб."
+                    display_label = "Цена за единицу"
+                except:
+                    pass
 
             ctk.CTkLabel(card, text=f"{display_label}:", text_color="#aaaaaa").grid(row=data_rows, column=0,
                                                                                     padx=(10, 5), pady=2,
@@ -235,4 +373,34 @@ def display_entity_cards(app, entity_name, records, columns):
             data_rows += 1
             if data_rows >= 6:
                 break
+        # Кнопка для завершения записи (создаёт финансовую запись о прибыли)
+        if entity_name == "Записи":
+            def _complete(rid=record['ID']):
+                complete_appointment(app, rid)
+
+            ctk.CTkButton(card, text="✅ Завершить", fg_color="#2ECC71", command=_complete).grid(
+                row=data_rows, column=0, columnspan=2, padx=10, pady=(8, 6), sticky="ew")
+            data_rows += 1
+        
+        # Для услуг - показываем расход материалов
+        if entity_name == "Услуги":
+            cursor = app.conn.cursor()
+            cursor.execute('''
+                SELECT s."Название_Товара", rm."Количество", s."Единица_измерения"
+                FROM "Расход_Материалов" rm
+                JOIN "Склад" s ON rm."ID_Материала" = s.ID
+                WHERE rm."ID_Услуги" = ?
+            ''', (record['ID'],))
+            materials = cursor.fetchall()
+            
+            if materials:
+                materials_text = ", ".join([f"{m['Название_Товара']} ({m['Количество']} {m['Единица_измерения']})" 
+                                           for m in materials[:2]])  # Показываем максимум 2 материала
+                if len(materials) > 2:
+                    materials_text += f" (+{len(materials) - 2} еще)"
+                
+                ctk.CTkLabel(card, text="Материалы:", text_color="#aaaaaa", font=ctk.CTkFont(size=9)).grid(
+                    row=data_rows, column=0, padx=(10, 5), pady=2, sticky="w")
+                ctk.CTkLabel(card, text=materials_text, font=ctk.CTkFont(size=9), text_color="#888888").grid(
+                    row=data_rows, column=1, padx=(5, 10), pady=2, sticky="w")
 

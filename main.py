@@ -23,7 +23,7 @@ class DBApp(ctk.CTk):
         self.current_entity = None
         self.selected_card = None
         self.card_frames = []
-        self.sidebar_buttons = {}  # Словарь для хранения кнопок сайдбара
+        self.sidebar_buttons = {}
 
         database.initialize_database(self.conn)
         database.insert_sample_data(self.conn)
@@ -172,7 +172,11 @@ class DBApp(ctk.CTk):
             messagebox.showwarning("Предупреждение", "Удаление здесь не поддерживается.")
             return
         if messagebox.askyesno("Подтверждение", "Удалить запись?"):
-            self.conn.execute(f'DELETE FROM "{self.current_entity}" WHERE ID = ?', (self.selected_card.record_id,))
+            record_id = self.selected_card.record_id
+            # Если удаляем услугу, также удаляем связанные расходы материалов
+            if self.current_entity == "Услуги":
+                self.conn.execute('DELETE FROM "Расход_Материалов" WHERE "ID_Услуги" = ?', (record_id,))
+            self.conn.execute(f'DELETE FROM "{self.current_entity}" WHERE ID = ?', (record_id,))
             self.conn.commit()
             self._display_entity_data(self.current_entity)
 
