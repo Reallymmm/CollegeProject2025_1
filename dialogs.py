@@ -540,15 +540,17 @@ def open_add_employee_dialog(app):
         emp_id = cur.lastrowid
 
         for sid, var in service_vars:
-            try:
-                if var.get():
-                    cur.execute(
-                        'INSERT INTO "Сотрудник_Услуги" ("ID_Сотрудника", "ID_Услуги") '
-                        "VALUES (?, ?)",
-                        (emp_id, sid),
-                    )
-            except Exception:
+            if not var.get():
                 continue
+            try:
+                cur.execute(
+                    'INSERT INTO "Сотрудник_Услуги" ("ID_Сотрудника", "ID_Услуги") '
+                    'VALUES (?, ?)',
+                    (emp_id, sid),
+                )
+            except Exception as e:
+                print("Ошибка при вставке в Сотрудник_Услуги:", e)
+                raise
 
         app.conn.commit()
         messagebox.showinfo(
@@ -558,7 +560,22 @@ def open_add_employee_dialog(app):
         )
         dialog.destroy()
         app._display_entity_data("Сотрудники")
+        app.conn.commit()
 
+        # --- ОТЛАДКА: покажем, какие услуги привязаны к этому мастеру ---
+        debug_cur = app.conn.cursor()
+        debug_cur.execute(
+            'SELECT e."Имя", u."Название" '
+            'FROM "Сотрудник_Услуги" su '
+            'JOIN "Сотрудники" e ON su."ID_Сотрудника" = e.ID '
+            'JOIN "Услуги" u ON su."ID_Услуги" = u.ID '
+            'WHERE su."ID_Сотрудника" = ?',
+            (emp_id,)
+        )
+        print("Связи для мастера:", name)
+        for row in debug_cur.fetchall():
+            print("  ", row["Имя"], "->", row["Название"])
+        # --- конец отладки ---
     ctk.CTkButton(
         dialog,
         text="Сохранить",
@@ -1036,27 +1053,48 @@ def open_add_appointment_dialog(app):
     row += 1
 
     service_vars = []
+    service_vars = []  # список (ID_услуги, tk.IntVar, длительность, название)
 
     def render_services_for_employee(*_):
+        # очищаем фрейм и список переменных
         for w in services_frame.winfo_children():
             w.destroy()
         service_vars.clear()
 
-        emp_name = combo_emp.get()
+        emp_name = combo_emp.get().strip()
         emp_id = name_to_id_emp.get(emp_name)
 
-        allowed_ids = set()
-        if emp_id:
-            cur = app.conn.cursor()
-            cur.execute(
-                'SELECT "ID_Услуги" FROM "Сотрудник_Услуги" WHERE "ID_Сотрудника"=?',
-                (emp_id,)
-            )
-            allowed_ids = {r['ID_Услуги'] for r in cur.fetchall()}
+        if not emp_id:
+            # сотрудник ещё не выбран
+            ctk.CTkLabel(
+                services_frame,
+                text="Сначала выберите сотрудника",
+            ).grid(row=0, column=0, sticky="w", padx=5, pady=2)
+            return
 
+        # создаём курсор
+        cur = app.conn.cursor()
+
+        # берём все ID услуг, назначенных этому сотруднику
+        cur.execute(
+            'SELECT "ID_Услуги" FROM "Сотрудник_Услуги" WHERE "ID_Сотрудника"=?',
+            (emp_id,)
+        )
+        rows = cur.fetchall()
+        allowed_ids = {r['ID_Услуги'] for r in rows}
+
+        if not allowed_ids:
+            # у этого мастера реально нет строк в таблице Сотрудник_Услуги
+            ctk.CTkLabel(
+                services_frame,
+                text="Для этого мастера не назначено ни одной услуги",
+            ).grid(row=0, column=0, sticky="w", padx=5, pady=2)
+            return
+
+        # рисуем только те услуги, которые мастер умеет
         r_ = 0
         for s in all_services:
-            if allowed_ids and s["ID"] not in allowed_ids:
+            if s["ID"] not in allowed_ids:
                 continue
             var = tk.IntVar()
             txt = f'{s["Название"]} ({s["Длительность"]} мин)'
@@ -1199,7 +1237,11 @@ def open_add_appointment_dialog(app):
                                    "Выберите хотя бы одну услугу.",
                                    parent=dialog)
             return
+
+        # Суммарная длительность всех выбранных услуг (в минутах)
         total_duration = sum(d for _, _, d in selected_services)
+
+        # Разбор времени
         try:
             parts = time_val.split(":")
             if len(parts) != 2:
@@ -1214,6 +1256,7 @@ def open_add_appointment_dialog(app):
                                  parent=dialog)
             return
 
+        # Грубая проверка по времени работы салона
         if hour < 8 or hour > 22 or (hour == 22 and minute > 0):
             messagebox.showerror("Ошибка",
                                  "Время должно быть в интервале 08:00–22:00 (включительно).",
@@ -1227,8 +1270,28 @@ def open_add_appointment_dialog(app):
         if not emp_id or not cli_id:
             messagebox.showerror("Ошибка", "Выберите сотрудника и клиента.", parent=dialog)
             return
+
+        # ===== создаём курсор =====
         cur = app.conn.cursor()
 
+        # ===== проверяем, что мастер умеет все выбранные услуги =====
+        cur.execute(
+            'SELECT "ID_Услуги" FROM "Сотрудник_Услуги" WHERE "ID_Сотрудника"=?',
+            (emp_id,)
+        )
+        allowed_ids = {r['ID_Услуги'] for r in cur.fetchall()}
+
+        disallowed = [name for sid, name, dur in selected_services if sid not in allowed_ids]
+
+        if disallowed:
+            messagebox.showerror(
+                "Ошибка",
+                "Мастер не выполняет следующие услуги:\n" + "\n".join(disallowed),
+                parent=dialog,
+            )
+            return
+
+        # ===== проверка попадания в смену =====
         cur.execute(
             'SELECT "Время_Начала", "Время_Конца" FROM "График работы" '
             'WHERE "ID_Сотрудника"=? AND "Дата"=?',
@@ -1286,6 +1349,7 @@ def open_add_appointment_dialog(app):
             (date_val, time_val_norm, cli_id, emp_id, first_service_id)
         )
         record_id = cur.lastrowid
+
         service_ids = []
         service_names = []
         for sid, name, dur in selected_services:
@@ -1296,7 +1360,7 @@ def open_add_appointment_dialog(app):
                 (record_id, sid)
             )
 
-        materials_needed = {}
+        materials_needed = {}  # ID_Материала -> суммарное кол-во
         for sid in service_ids:
             cur.execute(
                 'SELECT "ID_Материала", "Количество" '
