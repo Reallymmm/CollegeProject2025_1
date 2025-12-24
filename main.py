@@ -11,7 +11,6 @@ import views
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-
 class DBApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -26,7 +25,6 @@ class DBApp(ctk.CTk):
         self.sidebar_buttons = {}
 
         database.initialize_database(self.conn)
-        database.insert_sample_data(self.conn)
 
         self.calendar_date = datetime.date.today()
         self.schedule_date = datetime.date.today()
@@ -35,7 +33,6 @@ class DBApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
-        # --- Сайдбар ---
         self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
 
@@ -50,12 +47,11 @@ class DBApp(ctk.CTk):
             btn = ctk.CTkButton(self.sidebar_frame, text=entity_name,
                                 command=lambda name=entity_name: self.select_entity(name))
             btn.grid(row=row_counter, column=0, padx=20, pady=5, sticky="ew")
-            self.sidebar_buttons[entity_name] = btn  # Сохраняем ссылку на кнопку
+            self.sidebar_buttons[entity_name] = btn
             row_counter += 1
 
         self.sidebar_frame.grid_rowconfigure(row_counter, weight=1)
 
-        # --- Контент ---
         self.content_frame = ctk.CTkFrame(self)
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.content_frame.grid_rowconfigure(1, weight=1)
@@ -85,14 +81,11 @@ class DBApp(ctk.CTk):
         self._display_entity_data(entity_name)
 
     def _update_sidebar_buttons(self):
-        """Обновляет подсветку кнопок в сайдбаре"""
         for entity_name, button in self.sidebar_buttons.items():
             if entity_name == self.current_entity:
-                # Выделяем активную кнопку с обводкой
                 button.configure(fg_color="#3A8FCD", hover_color="#2A7FBD", 
                                border_color="#5BB3F0", border_width=2)
             else:
-                # Сбрасываем стиль остальных кнопок
                 button.configure(fg_color=["#3B8ED0", "#1F6AA5"], hover_color=["#36719F", "#144870"],
                                border_width=0)
 
@@ -121,14 +114,13 @@ class DBApp(ctk.CTk):
             return
 
         else:
-            # Стандартный вид (Карточки)
             self.top_controls.grid_columnconfigure((0, 1, 2), weight=1)
             cursor = self.conn.cursor()
             cursor.execute(f'SELECT * FROM "{entity_name}"')
             records = cursor.fetchall()
             columns = self._get_table_columns(entity_name)
 
-            self._setup_card_controls()  # Настройка кнопок
+            self._setup_card_controls() 
 
             self.scrollable_cards_frame.configure(label_text=f"Данные: {entity_name} ({len(records)} записей)")
             views.display_entity_cards(self, entity_name, records, columns)
@@ -136,7 +128,7 @@ class DBApp(ctk.CTk):
         self.title(f"Менеджер Салонной БД - {entity_name}")
 
     def _setup_card_controls(self):
-        # Стандартные кнопки
+
         ctk.CTkButton(self.top_controls, text="➕ Добавить", command=self.open_add_record_dialog).grid(row=0, column=0,
                                                                                                       padx=5, pady=10,
                                                                                                       sticky="ew")
@@ -147,10 +139,7 @@ class DBApp(ctk.CTk):
                                                                                                             padx=5,
                                                                                                             pady=10,
                                                                                                             sticky="ew")
-
-        # === СПЕЦИАЛЬНЫЕ КНОПКИ ДЛЯ СКЛАДА ===
         if self.current_entity == "Склад":
-            # Сброс сетки для вмещения новых кнопок
             self.top_controls.grid_columnconfigure((0, 1, 2), weight=0)
             self.top_controls.grid_columnconfigure(3, weight=2)
             self.top_controls.grid_columnconfigure(4, weight=1)
@@ -172,9 +161,16 @@ class DBApp(ctk.CTk):
             return
         if messagebox.askyesno("Подтверждение", "Удалить запись?"):
             record_id = self.selected_card.record_id
-            # Если удаляем услугу, также удаляем связанные расходы материалов
             if self.current_entity == "Услуги":
                 self.conn.execute('DELETE FROM "Расход_Материалов" WHERE "ID_Услуги" = ?', (record_id,))
+                try:
+                    self.conn.execute('DELETE FROM "Сотрудник_Услуги" WHERE "ID_Услуги" = ?', (record_id,))
+                except Exception:
+                    pass
+                try:
+                    self.conn.execute('DELETE FROM "Запись_Услуги" WHERE "ID_Услуги" = ?', (record_id,))
+                except Exception:
+                    pass
             self.conn.execute(f'DELETE FROM "{self.current_entity}" WHERE ID = ?', (record_id,))
             self.conn.commit()
             self._display_entity_data(self.current_entity)
